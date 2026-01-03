@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ОСББ DAO - Панель управління</title>
+  </head>
+  <body>
+    <div id="app" class="container">
+      <!-- Header -->
+        <div class="header">
+            <div class="logo">
+                <div class="logo-icon">🏢</div>
+                <div class="logo-text">
+                    <h1>ОСББ DAO</h1>
+                    <p>Децентралізоване управління будинком</p>
+                </div>
+            </div>
+            <div class="wallet-info">
+                <select id="accountSelector" class="account-selector">
+                    <option value="">Завантаження...</option>
+                </select>
+                <div class="status-dot"></div>
+            </div>
+        </div>
+
+        <!-- Stats Grid -->
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-card-header">
+                    <div class="stat-icon purple">💰</div>
+                </div>
+                <div class="stat-label">Баланс ОСББ</div>
+                <div class="stat-value" id="daoBalance">0 ETH</div>
+                <div class="stat-subtitle">Фонд будинку</div>
+            </div>
+
+            <div class="stat-card">
+                <div class="stat-card-header">
+                    <div class="stat-icon green">👥</div>
+                </div>
+                <div class="stat-label">Мешканців</div>
+                <div class="stat-value" id="residentCount">0</div>
+                <div class="stat-subtitle" id="totalArea">0 м² загальна площа</div>
+            </div>
+
+            <div class="stat-card">
+                <div class="stat-card-header">
+                    <div class="stat-icon blue">📋</div>
+                </div>
+                <div class="stat-label">Пропозицій</div>
+                <div class="stat-value" id="proposalCount">0</div>
+                <div class="stat-subtitle">Всього створено</div>
+            </div>
+
+            <div class="stat-card">
+                <div class="stat-card-header">
+                    <div class="stat-icon orange">🗳️</div>
+                </div>
+                <div class="stat-label">Ваш голос</div>
+                <div class="stat-value" id="votingPower">0</div>
+                <div class="stat-subtitle" id="userArea">0 м² квартира</div>
+            </div>
+        </div>
+
+        <!-- Tabs -->
+        <div class="tabs">
+            <button class="tab active" onclick="showTab('proposals')">📋 Пропозиції</button>
+            <button class="tab" onclick="showTab('create')">➕ Створити</button>
+            <button class="tab" onclick="showTab('residents')">👥 Мешканці</button>
+            <button class="tab" onclick="showTab('register')">📝 Реєстрація</button>
+        </div>
+
+        <!-- Proposals Section -->
+        <div id="proposals" class="content-section active">
+            <h2 class="section-title">📋 Пропозиції</h2>
+            <p class="section-subtitle">Голосуйте за рішення щодо витрат фонду ОСББ</p>
+            <div id="proposalsList" class="proposals-grid">
+                <div class="loading">
+                    <div class="spinner"></div>
+                    <p>Завантаження пропозицій...</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Create Proposal Section -->
+        <div id="create" class="content-section">
+            <h2 class="section-title">➕ Створити нову пропозицію</h2>
+            <p class="section-subtitle">Запропонуйте витрату коштів фонду ОСББ</p>
+
+            <div id="createAlert"></div>
+
+            <div class="form-grid">
+                <div class="form-group">
+                    <label class="form-label">Назва пропозиції</label>
+                    <input type="text" id="proposalTitle" class="form-input" placeholder="Наприклад: Ремонт даху">
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Опис</label>
+                    <textarea id="proposalDescription" class="form-textarea" placeholder="Детальний опис пропозиції..."></textarea>
+                </div>
+
+                <div class="form-grid" style="grid-template-columns: 1fr 1fr;">
+                    <div class="form-group">
+                        <label class="form-label">Сума (ETH)</label>
+                        <input type="number" id="proposalAmount" class="form-input" placeholder="5.0" step="0.1">
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">Період голосування (днів)</label>
+                        <input type="number" id="proposalDuration" class="form-input" value="7" min="3">
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Адреса виконавця</label>
+                    <input type="text" id="proposalExecutor" class="form-input" placeholder="0x...">
+                </div>
+            </div>
+
+            <button class="btn btn-primary" style="width: 100%;" onclick="createProposal()">🚀 Створити пропозицію</button>
+        </div>
+
+        <!-- Residents Section -->
+        <div id="residents" class="content-section">
+            <h2 class="section-title">👥 Зареєстровані мешканці</h2>
+            <p class="section-subtitle">Список всіх власників квартир</p>
+
+            <div class="table-wrapper">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Адреса</th>
+                            <th>Площа квартири</th>
+                            <th>Сила голосу</th>
+                            <th>Роль</th>
+                        </tr>
+                    </thead>
+                    <tbody id="residentsTable">
+                        <tr>
+                            <td colspan="4" style="text-align: center;">Завантаження...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Register Resident Section -->
+        <div id="register" class="content-section">
+            <h2 class="section-title">📝 Реєстрація нового мешканця</h2>
+            <p class="section-subtitle">Тільки адміністратор може додавати нових мешканців</p>
+
+            <div id="registerAlert"></div>
+
+            <div class="form-grid">
+                <div class="form-group">
+                    <label class="form-label">Адреса гаманця мешканця</label>
+                    <input type="text" id="residentAddress" class="form-input" placeholder="0x...">
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Площа квартири (м²)</label>
+                    <input type="number" id="residentArea" class="form-input" placeholder="50">
+                </div>
+            </div>
+
+            <button class="btn btn-primary" style="width: 100%;" onclick="registerResident()">✅ Зареєструвати мешканця</button>
+
+            <div style="margin-top: 30px; padding: 20px; background: #fef3c7; border-radius: 10px; border-left: 4px solid #f59e0b;">
+                <strong>ℹ️ Інформація:</strong>
+                <ul style="margin-top: 10px; margin-left: 20px; color: #92400e;">
+                    <li>Мешканець отримає токени пропорційно площі квартири (100 токенів = 1 м²)</li>
+                    <li>Токени використовуються тільки для голосування</li>
+                    <li>Токени не можна передавати іншим користувачам</li>
+                </ul>
+            </div>
+        </div>
+
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
