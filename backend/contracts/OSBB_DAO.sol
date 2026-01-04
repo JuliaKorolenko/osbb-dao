@@ -1,13 +1,11 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import "../node_modules/@openzeppelin/contracts/token/ERC20/ERC20.sol";
-import "../node_modules/@openzeppelin/contracts/token/ERC20/extensions/ERC20Votes.sol";
-import "../node_modules/@openzeppelin/contracts/token/ERC20/extensions/ERC20Permit.sol";
-import "../node_modules/@openzeppelin/contracts/access/AccessControl.sol";
-import "../node_modules/@openzeppelin/contracts/utils/ReentrancyGuard.sol";
-
-// таймлог
+import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/extensions/ERC20Votes.sol";
+import "@openzeppelin/contracts/token/ERC20/extensions/ERC20Permit.sol";
+import "@openzeppelin/contracts/access/AccessControl.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 /**
  * @title OSBB_Token
@@ -35,14 +33,11 @@ contract OSBB_Token is ERC20, ERC20Permit, ERC20Votes, AccessControl {
 
     /**
      * @dev ЗАБОРОНА ТРАНСФЕРІВ - токени не можна переказувати!
-     * Токени представляють право голосу власника квартири
-     * і не можуть бути продані або передані
      */
     function _update(address from, address to, uint256 amount)
         internal
         override(ERC20, ERC20Votes)
     {
-        // Дозволяємо тільки mint (from == address(0)) і burn (to == address(0))
         require(
             from == address(0) || to == address(0),
             "Tokeny ne mozhna perekaduvaty! Vony pryviazani do kvartiry"
@@ -50,7 +45,6 @@ contract OSBB_Token is ERC20, ERC20Permit, ERC20Votes, AccessControl {
         super._update(from, to, amount);
     }
 
-    // Необхідні override функції
     function nonces(address owner)
         public
         view
@@ -64,7 +58,6 @@ contract OSBB_Token is ERC20, ERC20Permit, ERC20Votes, AccessControl {
 /**
  * @title OSBB_DAO
  * @dev Смарт-контракт для управління коштами ОСББ
- * Використовує non-transferable токени для голосування
  */
 contract OSBB_DAO is AccessControl, ReentrancyGuard {
     
@@ -72,7 +65,6 @@ contract OSBB_DAO is AccessControl, ReentrancyGuard {
     
     OSBB_Token public governanceToken;
     
-    // Структура пропозиції
     struct Proposal {
         uint256 id;
         string description;
@@ -81,11 +73,24 @@ contract OSBB_DAO is AccessControl, ReentrancyGuard {
         uint256 deadline;
         uint256 votesFor;
         uint256 votesAgainst;
-        uint256 snapshotId; // Snapshot токенів на момент створення
+        uint256 snapshotId;
         bool executed;
         bool canceled;
-        mapping(address => VoteReceipt) receipts;
     }
+
+    struct ProposalView {
+      uint256 id;
+      string description;
+      uint256 votesFor;
+      uint256 votesAgainst;
+      uint256 snapshotId;
+      uint256 deadline;
+      uint256 queuedAt;
+      bool executed;
+      bool canceled;
+      ProposalState state;
+      bool passed;
+  }
     
     // Структура запису про голосування
     struct VoteReceipt {
@@ -103,8 +108,9 @@ contract OSBB_DAO is AccessControl, ReentrancyGuard {
     
     // Змінні стану
     uint256 public totalArea;
-    uint256 public constant TOKENS_PER_SQUARE_METER = 100; // 100 токенів = 1 м²
-    uint256 public constant QUORUM_PERCENTAGE = 50; // 50% для кворуму
+    uint256 public constant TOKENS_PER_SQUARE_METER = 100;
+    uint256 public constant QUORUM_PERCENTAGE = 80;
+    uint256 public constant APPROVAL_THRESHOLD = 50;      // >50% голосів "ЗА"
     uint256 public constant MIN_VOTING_PERIOD = 3 days;
     uint256 public constant TIMELOCK_DELAY = 2 days;
     
@@ -112,9 +118,22 @@ contract OSBB_DAO is AccessControl, ReentrancyGuard {
     
     mapping(address => Resident) public residents;
     mapping(uint256 => Proposal) public proposals;
-    mapping(uint256 => uint256) public queuedAt; // queuedAt — время, когда proposal был поставлен в очередь.
+    // ОКРЕМИЙ маппінг для голосів
+    mapping(uint256 => mapping(address => VoteReceipt)) public voteReceipts;
+    mapping(uint256 => uint256) public queuedAt;
     
     address[] public residentList;
+
+    enum ProposalState {
+      Active,      // голосование идёт
+      Defeated,    // голосование завершено, но не прошло
+      Succeeded,   // прошло голосование, но ещё не queued
+      Queued,      // поставлено в очередь (timelock идёт)
+      Executable,  // timelock закончился, можно исполнять
+      Executed,    // исполнено
+      Canceled     // отменено
+    }
+
     
     // Події
     event ResidentRegistered(address indexed resident, uint256 apartmentArea, uint256 votingPower);
@@ -138,7 +157,6 @@ contract OSBB_DAO is AccessControl, ReentrancyGuard {
     event ProposalCanceled(uint256 indexed proposalId);
     event ProposalQueued(uint256 indexed proposalId, uint256 queuedAt);
     
-    // Модифікатори
     modifier proposalExists(uint256 _proposalId) {
         require(_proposalId > 0 && _proposalId <= _proposalIdCounter, "Propozyciya ne isnuye");
         _;
@@ -148,17 +166,10 @@ contract OSBB_DAO is AccessControl, ReentrancyGuard {
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
         _grantRole(ADMIN_ROLE, msg.sender);
         
-        // Створюємо NON-TRANSFERABLE токен голосування
         governanceToken = new OSBB_Token();
         governanceToken.grantRole(governanceToken.MINTER_ROLE(), address(this));
     }
     
-    /**
-     * @dev Реєстрація мешканця з площею квартири
-     * Токени НЕ МОЖНА продати - вони прив'язані до квартири!
-     * @param _resident Адреса мешканця
-     * @param _apartmentArea Площа квартири в м²
-     */
     function registerResident(address _resident, uint256 _apartmentArea) 
         external 
         onlyRole(ADMIN_ROLE) 
@@ -167,7 +178,6 @@ contract OSBB_DAO is AccessControl, ReentrancyGuard {
         require(_apartmentArea > 0, "Ploshcha kvartiry maye buty bilshe 0");
         require(_resident != address(0), "Nevirna adresa");
         
-        // Розраховуємо кількість токенів (право голосу)
         uint256 votingPower = _apartmentArea * TOKENS_PER_SQUARE_METER;
         
         residents[_resident] = Resident({
@@ -179,78 +189,53 @@ contract OSBB_DAO is AccessControl, ReentrancyGuard {
         residentList.push(_resident);
         totalArea += _apartmentArea;
         
-        // Випускаємо токени голосування (НЕ ВАЛЮТА!)
         governanceToken.mint(_resident, votingPower);
         
         emit ResidentRegistered(_resident, _apartmentArea, votingPower);
     }
     
-    /**
-     * @dev Видалення мешканця (спалення токенів голосування)
-     * @param _resident Адреса мешканця
-     */
     function removeResident(address _resident) external onlyRole(ADMIN_ROLE) {
-        require(residents[_resident].isActive, "Meshkanets ne zareyestrovanyy");
-        // require(!hasActiveProposal, "Cannot remove during active voting");
+      require(residents[_resident].isActive, "Meshkanets ne zareyestrovanyy");
+
+      uint256 area = residents[_resident].apartmentArea;
+      uint256 votingPower = governanceToken.balanceOf(_resident);
+      
+      totalArea -= area;
+      residents[_resident].isActive = false;
+      
+      if (votingPower > 0) {
+          governanceToken.burn(_resident, votingPower);
+      }
+      
+      for (uint256 i = 0; i < residentList.length; i++) {
+          if (residentList[i] == _resident) {
+              residentList[i] = residentList[residentList.length - 1];
+              residentList.pop();
+              break;
+          }
+      }
         
-        uint256 area = residents[_resident].apartmentArea;
-        uint256 votingPower = governanceToken.balanceOf(_resident);
-        
-        totalArea -= area;
-        residents[_resident].isActive = false;
-        
-        // Спалюємо токени голосування
-        if (votingPower > 0) {
-            governanceToken.burn(_resident, votingPower);
-        }
-        
-        // Видалення з масиву residentList
-        for (uint256 i = 0; i < residentList.length; i++) {
-            if (residentList[i] == _resident) {
-                residentList[i] = residentList[residentList.length - 1];
-                residentList.pop();
-                break;
-            }
-        }
-        
-        emit ResidentRemoved(_resident, votingPower);
+      emit ResidentRemoved(_resident, votingPower);
     }
     
-    /**
-     * @dev Поповнення загального фонду ОСББ (реальні гроші - ETH)
-     */
     function depositFunds() external payable {
-        require(msg.value > 0, "Suma maye buty bilshe 0");
-        emit FundsDeposited(msg.sender, msg.value);
+      require(msg.value > 0, "Suma maye buty bilshe 0");
+      emit FundsDeposited(msg.sender, msg.value);
     }
     
-    /**
-     * @dev Отримання балансу ОСББ (реальні гроші)
-     */
     function getBalance() external view returns (uint256) {
-        return address(this).balance;
+      return address(this).balance;
     }
     
-    /**
-     * @dev Отримання ваги голосу мешканця (НЕ гроші, а право голосу!)
-     * @param _resident Адреса мешканця
-     */
     function getVotingPower(address _resident) public view returns (uint256) {
-        return governanceToken.balanceOf(_resident);
+      return governanceToken.balanceOf(_resident);
     }
     
-    /**
-     * @dev Створення нової пропозиції
-     * @param _description Опис пропозиції
-     * @param _amount Сума витрат у wei (реальні ETH!)
-     * @param _executor Адреса виконавця
-     * @param _votingPeriod Період голосування в секундах
-     */
     function createProposal(
-        string memory _description,
-        uint256 _amount,
-        address payable _executor,
-        uint256 _votingPeriod
+      string memory _description,
+      uint256 _amount,
+      address payable _executor,
+      uint256 _votingPeriod
     ) external returns (uint256) {
         require(governanceToken.balanceOf(msg.sender) > 0, "U vas nemaye prava stvoruvaty propozytsiyi");
         require(_amount > 0, "Suma maye buty bilshe 0");
@@ -262,89 +247,177 @@ contract OSBB_DAO is AccessControl, ReentrancyGuard {
         _proposalIdCounter++;
         uint256 newProposalId = _proposalIdCounter;
         uint256 deadline = block.timestamp + _votingPeriod;
-        // uint256 deadline = block.timestamp + 3 minutes;
+
+        uint256 snapshotBlock = block.number > 0 ? block.number - 1 : 0;
         
-        Proposal storage newProposal = proposals[newProposalId];
-        newProposal.id = newProposalId;
-        newProposal.description = _description;
-        newProposal.amount = _amount;
-        newProposal.executor = _executor;
-        newProposal.deadline = deadline;
-        // newProposal.snapshotId = block.number - 1; // Використовуємо block.number як snapshot
-        newProposal.snapshotId = block.number; // Використовуємо block.number як snapshot
-        newProposal.votesFor = 0;
-        newProposal.votesAgainst = 0;
-        newProposal.executed = false;
-        newProposal.canceled = false;
+        proposals[newProposalId] = Proposal({
+          id: newProposalId,
+          description: _description,
+          amount: _amount,
+          executor: _executor,
+          deadline: deadline,
+          snapshotId: snapshotBlock,
+          votesFor: 0,
+          votesAgainst: 0,
+          executed: false,
+          canceled: false
+        });
         
         emit ProposalCreated(newProposalId, msg.sender, _description, _amount, _executor, deadline);
         
         return newProposalId;
     }
     
-    /**
-     * @dev Голосування за пропозицію
-     * Вага голосу = кількість токенів (площа квартири)
-     * @param _proposalId ID пропозиції
-     * @param _support true - за, false - проти
-     */
     function castVote(uint256 _proposalId, bool _support) 
         external 
         proposalExists(_proposalId) 
     {
         Proposal storage proposal = proposals[_proposalId];
         require(block.number > proposal.snapshotId, "Golosuvannya shche ne pochalosya");
-        
         require(block.timestamp <= proposal.deadline, "Termin holosuvannya zakinchyvsya");
         require(!proposal.executed, "Propozyciya vzhe vykonana");
         require(!proposal.canceled, "Propozyciya skasovana");
-        require(!proposal.receipts[msg.sender].hasVoted, "Vy vzhe proholosuvaly");
+        require(!voteReceipts[_proposalId][msg.sender].hasVoted, "Vy vzhe proholosuvaly");
         
-        // Використовуємо баланс на момент створення пропозиції
         uint256 votes = governanceToken.getPastVotes(msg.sender, proposal.snapshotId);
         require(votes > 0, "U vas nemaye prava holosu");
         
-        proposal.receipts[msg.sender] = VoteReceipt({
-            hasVoted: true,
-            support: _support,
-            votes: votes
+        voteReceipts[_proposalId][msg.sender] = VoteReceipt({
+          hasVoted: true,
+          support: _support,
+          votes: votes
         });
         
         if (_support) {
-            proposal.votesFor += votes;
+          proposal.votesFor += votes;
         } else {
-            proposal.votesAgainst += votes;
+          proposal.votesAgainst += votes;
         }
         
         emit VoteCast(msg.sender, _proposalId, _support, votes);
     }
     
-    /**
-     * @dev Перевірка чи пропозиція пройшла
-     * @param _proposalId ID пропозиції
-     */
     function proposalSucceeded(uint256 _proposalId) public view proposalExists(_proposalId) returns (bool) {
+      Proposal storage proposal = proposals[_proposalId];
+      
+      if (proposal.canceled || proposal.executed) {
+        return false;
+      }
+      
+      return _proposalPassed(_proposalId);
+    }
+
+     /**
+     * @dev Детальна інформація про стан голосування
+     */
+    function getProposalVotingStats(uint256 _proposalId) 
+        external 
+        view 
+        proposalExists(_proposalId)
+        returns (
+            uint256 totalSupply,
+            uint256 votedTokens,
+            uint256 votedFor,
+            uint256 votedAgainst,
+            uint256 participationRate,
+            uint256 requiredQuorum,
+            uint256 requiredApproval,
+            bool quorumReached,
+            bool approvalReached,
+            bool allVoted
+        )
+    {
+      Proposal storage proposal = proposals[_proposalId];
+      
+      totalSupply = governanceToken.getPastTotalSupply(proposal.snapshotId);
+      votedFor = proposal.votesFor;
+      votedAgainst = proposal.votesAgainst;
+      votedTokens = votedFor + votedAgainst;
+      
+      requiredQuorum = QUORUM_PERCENTAGE;
+      requiredApproval = APPROVAL_THRESHOLD;
+        
+      if (totalSupply > 0) {
+          participationRate = (votedTokens * 100) / totalSupply;
+          quorumReached = participationRate >= requiredQuorum;
+          allVoted = votedTokens == totalSupply;
+      } else {
+          participationRate = 0;
+          quorumReached = false;
+          allVoted = false;
+      }
+        
+      if (votedTokens > 0) {
+          approvalReached = (votedFor * 100) > (votedTokens * requiredApproval);
+      } else {
+          approvalReached = false;
+      }
+      
+      return (
+        totalSupply,
+        votedTokens,
+        votedFor,
+        votedAgainst,
+        participationRate,
+        requiredQuorum,
+        requiredApproval,
+        quorumReached,
+        approvalReached,
+        allVoted
+      );
+    }
+
+    /**
+     * @dev Перевірити чи всі резиденти проголосували
+     */
+    // function checkAllResidentsVoted(uint256 _proposalId)
+    //     external
+    //     view
+    //     proposalExists(_proposalId)
+    //     returns (
+    //         bool allVoted,
+    //         uint256 votedCount,
+    //         uint256 totalCount
+    //     )
+    // {
+    //     Proposal storage proposal = proposals[_proposalId];
+    //     uint256 voted = 0;
+    //     uint256 total = 0;
+        
+    //     for (uint256 i = 0; i < residentList.length; i++) {
+    //         address resident = residentList[i];
+    //         uint256 votingPower = governanceToken.getPastVotes(resident, proposal.snapshotId);
+            
+    //         if (votingPower > 0) {
+    //             total++;
+    //             if (voteReceipts[_proposalId][resident].hasVoted) {
+    //                 voted++;
+    //             }
+    //         }
+    //     }
+        
+    //     allVoted = (total > 0) && (voted == total);
+        
+    //     return (allVoted, voted, total);
+    // }
+    
+    function queueProposal(uint256 _proposalId)
+        external
+        proposalExists(_proposalId)
+    {
         Proposal storage proposal = proposals[_proposalId];
-        
-        uint256 totalSupply = governanceToken.getPastTotalSupply(proposal.snapshotId);
-        if (totalSupply == 0) return false;
-        
-        uint256 totalVotes = proposal.votesFor + proposal.votesAgainst;
-        
-        // Перевірка кворуму (мінімум 50% токенів повинно проголосувати)
-        bool quorumReached = (totalVotes * 100) >= (totalSupply * QUORUM_PERCENTAGE);
-        
-        // Перевірка більшості (більше 50% голосів "за")
-        bool majorityReached = proposal.votesFor > proposal.votesAgainst;
-        
-        return quorumReached && majorityReached;
+
+        require(!proposal.executed, "Already executed");
+        require(!proposal.canceled, "Canceled");
+        require(block.timestamp > proposal.deadline, "Voting not finished");
+        require(proposalSucceeded(_proposalId), "Proposal not passed");
+        require(queuedAt[_proposalId] == 0, "Already queued");
+
+        queuedAt[_proposalId] = block.timestamp;
+
+        emit ProposalQueued(_proposalId, block.timestamp);
     }
     
-    /**
-     * @dev Виконання схваленої пропозиції
-     * Переказує РЕАЛЬНІ ГРОШІ (ETH), а не токени!
-     * @param _proposalId ID пропозиції
-     */
     function executeProposal(uint256 _proposalId) 
         external 
         nonReentrant 
@@ -364,17 +437,12 @@ contract OSBB_DAO is AccessControl, ReentrancyGuard {
         
         proposal.executed = true;
         
-        // Переказ РЕАЛЬНИХ коштів (ETH) виконавцю
         (bool success, ) = proposal.executor.call{value: proposal.amount}("");
         require(success, "Transfer failed");
         
         emit ProposalExecuted(_proposalId, proposal.executor, proposal.amount);
     }
     
-    /**
-     * @dev Скасування пропозиції (тільки адмін)
-     * @param _proposalId ID пропозиції
-     */
     function cancelProposal(uint256 _proposalId) 
         external 
         onlyRole(ADMIN_ROLE) 
@@ -386,13 +454,10 @@ contract OSBB_DAO is AccessControl, ReentrancyGuard {
         require(!proposal.executed, "Propozyciya vzhe vykonana");
         require(!proposal.canceled, "Propozyciya vzhe skasovana");
         
-        // Перевіряємо чи можна скасувати
         bool votingActive = block.timestamp <= proposal.deadline;
-        bool proposalPassed = false;
         
         if (!votingActive) {
-            // Якщо голосування закінчилось, перевіряємо чи пройшла
-            proposalPassed = proposalSucceeded(_proposalId);
+            bool proposalPassed = proposalSucceeded(_proposalId);
             require(!proposalPassed, "Ne mozhna skasuvaty odobrenu propozytsiyu");
         }
         
@@ -402,45 +467,31 @@ contract OSBB_DAO is AccessControl, ReentrancyGuard {
       
     /**
      * @dev Отримання детальної інформації про пропозицію
-     * @param _proposalId ID пропозиції
+     * ТЕПЕР БЕЗ маппінгу - можна повертати!
      */
-    function getProposal(uint256 _proposalId) 
-        external 
-        view 
+    function getProposal(uint256 proposalId)
+        external
+        view
+        proposalExists(proposalId)
         returns (
-            uint256 id,
-            string memory description,
-            uint256 amount,
-            address executor,
-            uint256 deadline,
-            uint256 votesFor,
-            uint256 votesAgainst,
-            bool executed,
-            bool canceled,
-            bool succeeded,
-            uint256 snapshotId
-
-        ) 
+          uint256 id,
+          string memory description,
+          uint256 amount,
+          address executor,
+          uint256 deadline,
+          uint256 votesFor,
+          uint256 votesAgainst,
+          bool executed,
+          bool canceled,
+          bool succeeded,
+          uint256 snapshotId
+        )
     {
-        // Перевірка без модифікатора, щоб не було revert
-        require(_proposalId > 0 && _proposalId <= _proposalIdCounter, "Propozyciya ne isnuye");
-        
-        Proposal storage proposal = proposals[_proposalId];
-        
-        // Перевірка чи пройшла (inline без виклику функції)
-        bool proposalSucceededResult = false;
-        
-        if (!proposal.canceled && !proposal.executed) {
-          uint256 totalSupply = governanceToken.getPastTotalSupply(proposal.snapshotId);
-            
-          if (totalSupply > 0) {
-            uint256 totalVotes = proposal.votesFor + proposal.votesAgainst;
-            bool quorumReached = (totalVotes * 100) >= (totalSupply * QUORUM_PERCENTAGE);
-            bool majorityReached = proposal.votesFor > proposal.votesAgainst;
-            proposalSucceededResult = quorumReached && majorityReached;
-          }
-        }
-        
+        Proposal storage proposal = proposals[proposalId];
+
+        // ProposalState state = getProposalState(proposalId);
+        bool passed = _proposalPassed(proposalId);
+
         return (
           proposal.id,
           proposal.description,
@@ -451,71 +502,87 @@ contract OSBB_DAO is AccessControl, ReentrancyGuard {
           proposal.votesAgainst,
           proposal.executed,
           proposal.canceled,
-          proposalSucceededResult,
+          passed,
           proposal.snapshotId
         );
+
+        // return ProposalView({
+        //   id: proposalId,
+        //   description: proposal.description,
+        //   votesFor: proposal.votesFor,
+        //   votesAgainst: proposal.votesAgainst,
+        //   snapshotId: proposal.snapshotId,
+        //   deadline: proposal.deadline,
+        //   queuedAt: queuedAt[proposalId],
+        //   executed: proposal.executed,
+        //   canceled: proposal.canceled,
+        //   state: state,
+        //   passed: passed
+        // });
     }
+
     
-    /**
-     * @dev Отримання стану пропозиції
-     * @param _proposalId ID пропозиції
-     */
-    function getProposalState(uint256 _proposalId) 
-        external 
-        view 
-        proposalExists(_proposalId) 
-        returns (string memory) 
+    function getProposalState(uint256 proposalId)
+        public
+        view
+        proposalExists(proposalId)
+        returns (ProposalState)
     {
-        Proposal storage proposal = proposals[_proposalId];
-        
+        Proposal storage proposal = proposals[proposalId];
+
         if (proposal.canceled) {
-            return "Canceled";
+            return ProposalState.Canceled;
         }
+
         if (proposal.executed) {
-            return "Executed";
+            return ProposalState.Executed;
         }
+
+        // голосование ещё идёт
         if (block.timestamp <= proposal.deadline) {
-            return "Active";
+            return ProposalState.Active;
         }
-        if (proposalSucceeded(_proposalId)) {
-            return "Succeeded";
+
+        // голосование завершено, но не прошло
+        if (!_proposalPassed(proposalId)) {
+            return ProposalState.Defeated;
         }
-        return "Defeated";
+
+        // прошло голосование, но ещё не queued
+        if (queuedAt[proposalId] == 0) {
+            return ProposalState.Succeeded;
+        }
+
+        // timelock ещё идёт
+        if (block.timestamp < queuedAt[proposalId] + TIMELOCK_DELAY) {
+            return ProposalState.Queued;
+        }
+
+        // timelock закончился
+        return ProposalState.Executable;
     }
+
     
-    /**
-     * @dev Отримання загальної кількості пропозицій
-     */
     function getProposalCount() external view returns (uint256) {
         return _proposalIdCounter;
     }
     
-    /**
-     * @dev Отримання кількості мешканців
-     */
     function getResidentCount() external view returns (uint256) {
         return residentList.length;
     }
     
-    /**
-     * @dev Отримання адреси токена голосування
-     */
     function getGovernanceToken() external view returns (address) {
         return address(governanceToken);
     }
     
-    /**
-     * @dev Отримання інформації про мешканця
-     */
     function getResidentInfo(address _resident) 
-        external 
-        view 
-        returns (
-            uint256 apartmentArea, 
-            uint256 votingPower, 
-            bool isActive
-        ) 
-    {
+      external 
+      view 
+      returns (
+        uint256 apartmentArea, 
+        uint256 votingPower, 
+        bool isActive
+      ) {
         Resident memory resident = residents[_resident];
         return (
             resident.apartmentArea,
@@ -525,61 +592,64 @@ contract OSBB_DAO is AccessControl, ReentrancyGuard {
     }
 
     /**
-    * @dev Перевірити чи проголосував користувач за пропозицію
-    * @param _proposalId ID пропозиції
-    * @param _voter Адреса голосуючого
-    */
+     * @dev Перевірити чи проголосував користувач (тепер через окремий маппінг)
+     */
     function isVoted(uint256 _proposalId, address _voter) 
-      external 
-      view 
-      proposalExists(_proposalId) 
-      returns (bool) 
+        external 
+        view 
+        proposalExists(_proposalId) 
+        returns (bool) 
     {
-        return proposals[_proposalId].receipts[_voter].hasVoted;
+        return voteReceipts[_proposalId][_voter].hasVoted;
     }
 
     /**
-    * @dev Отримати інформацію про голос користувача
-    * @param _proposalId ID пропозиції
-    * @param _voter Адреса голосуючого
-    */
+     * @dev Отримати інформацію про голос (тепер через окремий маппінг)
+     */
     function getVoteReceipt(uint256 _proposalId, address _voter)
-      external
-      view
-      proposalExists(_proposalId)
-      returns (bool hasVoted, bool support, uint256 votes)
+        external
+        view
+        proposalExists(_proposalId)
+        returns (bool hasVoted, bool support, uint256 votes)
     {
-        VoteReceipt memory receipt = proposals[_proposalId].receipts[_voter];
+        VoteReceipt memory receipt = voteReceipts[_proposalId][_voter];
         return (receipt.hasVoted, receipt.support, receipt.votes);
     }
 
-    function queueProposal(uint256 _proposalId)
-    external
-    proposalExists(_proposalId)
+    function _proposalPassed(uint256 proposalId)
+      internal
+      view
+      returns (bool)
     {
-        Proposal storage proposal = proposals[_proposalId];
+      Proposal storage proposal = proposals[proposalId];
 
-        require(!proposal.executed, "Already executed");
-        require(!proposal.canceled, "Canceled");
-        require(block.timestamp > proposal.deadline, "Voting not finished");
-        require(proposalSucceeded(_proposalId), "Proposal not passed");
-        require(queuedAt[_proposalId] == 0, "Already queued");
+      uint256 totalVotes = proposal.votesFor + proposal.votesAgainst;
 
-        queuedAt[_proposalId] = block.timestamp;
+      // защита от деления на ноль
+      if (totalVotes == 0) {
+          return false;
+      }
 
-        emit ProposalQueued(_proposalId, block.timestamp);
+      // total supply на момент snapshot
+      uint256 totalSupplyAtSnapshot =
+          governanceToken.getPastTotalSupply(proposal.snapshotId);
+
+      // 1️⃣ QUORUM: участвовало достаточно токенов
+      bool quorumReached =
+          (totalVotes * 100) >= (totalSupplyAtSnapshot * QUORUM_PERCENTAGE);
+
+      // 2️⃣ APPROVAL: достаточно "ЗА" среди проголосовавших
+      bool approvalReached =
+          (proposal.votesFor * 100) >= (totalVotes * APPROVAL_THRESHOLD);
+
+      return quorumReached && approvalReached;
     }
+
     
-    /**
-     * @dev Функція для прийому ETH (реальних грошей)
-     */
     receive() external payable {
         emit FundsDeposited(msg.sender, msg.value);
     }
     
-    /**
-     * @dev Fallback функція
-     */
     fallback() external payable {
         emit FundsDeposited(msg.sender, msg.value);
     }

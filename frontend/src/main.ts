@@ -206,8 +206,23 @@ async function renderProposal(proposal: ProposalData):  Promise<string> {
   const isActive = now <= deadline && !proposal.executed && !proposal.canceled;
 
   const executorBalance = await contractService.getAccountBalance(proposal.executor)
+  // console.log(">>> is succeeded", proposal);
 
-  console.log(">>>> now", new Date(now *1000).toLocaleString('uk-UA'));
+  const queuedAt = await contractService.queuedAt(proposal.id);
+  console.log(">>> queuedAt", queuedAt);
+
+  const timedelay = await contractService.getTimelockDelay();
+  const executeAt = Number(queuedAt + timedelay);
+  
+
+  // setInterval(() => {
+  //   timeLeft = executeAt - now;
+  //   const hours = Math.floor(timeLeft / 3600);
+  //   const minutes = Math.floor((timeLeft % 3600) / 60);
+  //   const seconds = timeLeft % 60;
+  //   console.log(">>>> timeLeft", timeLeft, `${hours}г ${minutes}хв ${seconds}с`);
+  // }, 1000);
+
   
   
   let statusClass = 'status-active';
@@ -251,9 +266,28 @@ async function renderProposal(proposal: ProposalData):  Promise<string> {
   if (currentAccount && isActive) {
     try {
       votingStatus = await contractService.getVotingStatus(proposal.id, currentAccount);
+      const stats = await contractService.getProposalVotingStats(proposal.id);
+
+      console.log(">>> stats", stats);
+      console.log(">>> isProposalSucceeded", proposal);
+      console.log(">>>> condition", !proposal.executed, !proposal.canceled, proposal.succeeded, now < deadline, queuedAt === 0);
+      
+      
       
       if (!votingStatus.canVote && votingStatus.reason) {
         voteInfo = `<div class="alert alert-info" style="margin-top: 10px;">ℹ️ ${votingStatus.reason}</div>`;
+      }
+      if(!proposal.executed && !proposal.canceled && proposal.succeeded && now < deadline && queuedAt === 0) {
+        voteInfo = `<div class="alert alert-success" style="margin-top: 10px;">
+          ✅ Пропозиція пройшла успішно! 
+          ${stats.votedFor} мешканців проголосували з загальною вагою ${stats.votedTokens} токенів.
+        </div>`;
+      } else {
+        voteInfo = `<div class="alert alert-error" style="margin-top: 10px;">
+          ❌ Пропозиція не набрала необхідної кількості голосів.
+          ${stats.votedFor
+      } мешканців проголосували з загальною вагою ${stats.votedTokens} токенів.
+        </div>`;
       }
     } catch (error) {
       console.error('Помилка перевірки статусу голосування:', error);
@@ -297,8 +331,22 @@ return `
           <button class="btn btn-vote-against" data-proposal-id="${proposal.id}" data-support="false">✗ Голосувати ПРОТИ</button>
         </div>
       ` : ''}
-      
-      ${!proposal.executed && !proposal.canceled && now > deadline && proposal.succeeded ? `
+
+
+      ${!proposal.executed && !proposal.canceled && proposal.succeeded && queuedAt === 0 && now > deadline ? `
+        <button class="btn btn-primary" style="width: 100%; margin-top: 10px;" data-queue-id="${proposal.id}">
+          🔨 Встати у чергу
+        </button>
+      ` : ''}
+
+      ${!proposal.executed && !proposal.canceled && queuedAt > 0 && now < executeAt ? `
+        <div class="alert alert-info" style="margin-top: 10px;">
+          ⏳ У черзі на виконання. Можна виконати після: ${new Date(executeAt * 1000).toLocaleString('uk-UA')}
+        </div>
+      ` : ''}
+
+
+      ${!proposal.executed && !proposal.canceled && now > executeAt && proposal.succeeded && queuedAt > 0 ? `
         <button class="btn btn-primary" style="width: 100%; margin-top: 10px;" data-execute-id="${proposal.id}">
           🔨 Виконати та переказати ${amountEth} ETH
         </button>
@@ -414,6 +462,12 @@ function setupEventListeners() {
       }
     }
 
+    // ✅ Обробник додавання у чергу
+    if (target.dataset.queueId) {
+      const proposalId = parseInt(target.dataset.queueId);
+      await handleQueueProposal(proposalId);
+    }
+
     // ✅ Обробник скасування
     if (target.dataset.cancelId) {
       const proposalId = parseInt(target.dataset.cancelId);
@@ -466,9 +520,27 @@ async function handleVote(proposalId: number, support: boolean) {
     
     showAlert(createAlertEl, 'success', `✅ Ви проголосували ${support ? 'ЗА' : 'ПРОТИ'}!`);
     
+    
     await loadProposals();
   } catch (error: any) {
     console.error(">>> Помилка handleVote:", error);
+    showAlert(createAlertEl, 'error', `❌ Помилка: ${error.message || error}`);
+  }
+}
+
+
+/** * Обробник додавання пропозиції у чергу
+ */
+async function handleQueueProposal(proposalId: number) {
+  console.log(">>> handleQueueProposal:", proposalId);
+  try {
+    showAlert(createAlertEl, 'info', '⏳ Додавання пропозиції у чергу...');
+    const tx = await contractService.queueProposal(proposalId);
+    await contractService.waitForTransaction(tx);
+    showAlert(createAlertEl, 'success', '✅ Пропозиція додана у чергу на виконання!');
+    await loadProposals();
+  } catch (error: any) {
+    console.error(">>> Помилка handleQueueProposal:", error);
     showAlert(createAlertEl, 'error', `❌ Помилка: ${error.message || error}`);
   }
 }

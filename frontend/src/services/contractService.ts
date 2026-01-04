@@ -22,6 +22,7 @@ export interface ProposalData {
   executed: boolean;
   canceled: boolean;
   succeeded: boolean;
+  snapshotId: bigint;
 }
 
 export interface ResidentInfo {
@@ -200,20 +201,59 @@ class ContractService {
     const proposals: ProposalData[] = [];   
     
     for (let i = 1; i <= Number(count); i++) {
+      try {
+        console.log(`🔍 Завантаження пропозиції #${i}...`);
+        const result = await this.daoContract.getProposal(i);
+          
+        console.log(`✅ Отримано дані пропозиції #${i}:`, result);
+        const [
+            id,
+            description,
+            amount,
+            executor,
+            deadline,
+            votesFor,
+            votesAgainst,
+            executed,
+            canceled,
+            succeeded,
+            snapshotId
+          ] = result;
+          
+          proposals.push({
+            id: Number(id),
+            description: description,
+            amount: amount,
+            executor: executor,
+            deadline: deadline,
+            votesFor: votesFor,
+            votesAgainst: votesAgainst,
+            executed: executed,
+            canceled: canceled,
+            succeeded: succeeded,
+            snapshotId: snapshotId
+          });
+          
+          // console.log(`✅ Пропозиція #${i} додана до списку`);
+        
+      } catch (error) {
+        console.error(`❌ Помилка отримання пропозиції #${i}:`, error);
+        continue;
+      }
       
-      const proposal = await this.daoContract.getProposal(i);
-      proposals.push({
-        id: i,
-        description: proposal.description,
-        amount: proposal.amount,
-        executor: proposal.executor,
-        deadline: proposal.deadline,
-        votesFor: proposal.votesFor,
-        votesAgainst: proposal.votesAgainst,
-        executed: proposal.executed,
-        canceled: proposal.canceled,
-        succeeded: proposal.succeeded
-      });
+      // const proposal = await this.daoContract.getProposal(i);
+      // proposals.push({
+      //   id: i,
+      //   description: proposal.description,
+      //   amount: proposal.amount,
+      //   executor: proposal.executor,
+      //   deadline: proposal.deadline,
+      //   votesFor: proposal.votesFor,
+      //   votesAgainst: proposal.votesAgainst,
+      //   executed: proposal.executed,
+      //   canceled: proposal.canceled,
+      //   succeeded: proposal.succeeded
+      // });
     }
 
     return proposals;
@@ -572,6 +612,72 @@ class ContractService {
     console.log('🚫 Скасування пропозиції, tx:', tx.hash);
     return tx;
   }
+
+   /**
+   * Отримати детальну статистику голосування
+   */
+  async getProposalVotingStats(proposalId: number): Promise<{
+    totalSupply: bigint;
+    votedTokens: bigint;
+    votedFor: bigint;
+    votedAgainst: bigint;
+    participationRate: bigint;
+    requiredQuorum: bigint;
+    requiredApproval: bigint;
+    quorumReached: boolean;
+    approvalReached: boolean;
+    allVoted: boolean;
+  }> {
+    if (!this.daoContract) throw new Error('DAO не ініціалізовано');
+
+    const stats = await this.daoContract.getProposalVotingStats(proposalId);
+    
+    return {
+      totalSupply: stats.totalSupply,
+      votedTokens: stats.votedTokens,
+      votedFor: stats.votedFor,
+      votedAgainst: stats.votedAgainst,
+      participationRate: stats.participationRate,
+      requiredQuorum: stats.requiredQuorum,
+      requiredApproval: stats.requiredApproval,
+      quorumReached: stats.quorumReached,
+      approvalReached: stats.approvalReached,
+      allVoted: stats.allVoted
+    };
+  }
+
+
+  // 
+  async queuedAt (proposalId: number): Promise<number> {
+    if (!this.daoContract) throw new Error('DAO не ініціалізовано'); 
+    const timestamp: bigint = await this.daoContract.queuedAt(proposalId);
+    return Number(timestamp);
+  } 
+
+  async queueProposal(proposalId: number): Promise<TransactionResponse> {
+    if (!this.daoContract) throw new Error('DAO не ініціалізовано');
+
+    const tx = await this.daoContract.queueProposal(proposalId);
+    console.log('⏱️ Додавання пропозиції до черги, tx:', tx.hash);
+    return tx;
+  }
+
+  async getTimelockDelay(): Promise<number> {
+    if (!this.daoContract) throw new Error('DAO не ініціалізовано'); 
+    const delay: bigint = await this.daoContract.TIMELOCK_DELAY();
+    return Number(delay);
+  }
+
+  // getTimeLeftToExecute(queuedAt: number, timelockDelay: number): number {
+  //   const executeAt = queuedAt + timelockDelay;
+
+  //   setInterval(() => {
+  //     const now = Math.floor(Date.now() / 1000);
+  //     return executeAt - now;
+  //    }, 1000);
+  //   const timeLeft = executeAt - Math.floor(Date.now() / 1000);
+  //   return timeLeft > 0 ? timeLeft : 0;
+  // }
 
 /**
  * Перемотка времени в Hardhat Network (только для разработки!)
