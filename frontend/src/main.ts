@@ -156,9 +156,7 @@ async function loadDashboard() {
 /**
  * Завантаження пропозицій
  */
-async function loadProposals() {
-  console.log(">>> loadProposals");
-  
+async function loadProposals() {  
   try {
     const proposals = await contractService.getProposals();
     console.log(">>> Пропозиції отримані:", proposals);
@@ -195,35 +193,31 @@ async function loadProposals() {
  * Рендер картки пропозиції
  */
 async function renderProposal(proposal: ProposalData):  Promise<string> {
+  const totalVotingPower = await contractService.getTotalVotingPower();
   const votesFor = Number(proposal.votesFor);
   const votesAgainst = Number(proposal.votesAgainst);
   const totalVotes = votesFor + votesAgainst;
-  const forPercent = totalVotes > 0 ? Math.round((votesFor * 100) / totalVotes) : 0;
+  const forPercent = Number(totalVotingPower) > 0 ? Math.round((votesFor * 100) / Number(totalVotingPower)) : 0;  
+  // const forPercent = Number(totalVotes) > 0 ? Math.round((votesFor * 100) / totalVotes) : 0;
   
-  // const now = Math.floor(Date.now() / 1000);
+  const votedPercent = totalVotes > 0 ? Math.round((totalVotes * 100) / Number(totalVotingPower)) : 0;
+
+  const quorumReached = totalVotes / (Number(totalVotingPower) / 100) >= 80;
+  const approvalReached = (votesFor > 0 || votesAgainst > 0) ? (votesFor * 100) >= (Number(totalVotingPower) * 50) : true; 
+  
+  // console.log(">>>===== totla percent", votedPercent, proposal.id, approvalReached, quorumReached);   
+
   const now = await contractService.getCurrentBlockTime();
   const deadline = Number(proposal.deadline);
   const isActive = now <= deadline && !proposal.executed && !proposal.canceled;
 
   const executorBalance = await contractService.getAccountBalance(proposal.executor)
-  // console.log(">>> is succeeded", proposal);
 
   const queuedAt = await contractService.queuedAt(proposal.id);
   console.log(">>> queuedAt", queuedAt);
 
   const timedelay = await contractService.getTimelockDelay();
-  const executeAt = Number(queuedAt + timedelay);
-  
-
-  // setInterval(() => {
-  //   timeLeft = executeAt - now;
-  //   const hours = Math.floor(timeLeft / 3600);
-  //   const minutes = Math.floor((timeLeft % 3600) / 60);
-  //   const seconds = timeLeft % 60;
-  //   console.log(">>>> timeLeft", timeLeft, `${hours}г ${minutes}хв ${seconds}с`);
-  // }, 1000);
-
-  
+  const executeAt = Number(queuedAt + timedelay);  
   
   let statusClass = 'status-active';
   let statusText = 'Активна';
@@ -234,7 +228,7 @@ async function renderProposal(proposal: ProposalData):  Promise<string> {
   } else if (proposal.canceled) {
     statusClass = 'status-rejected';
     statusText = 'Скасовано';
-  } else if (now > deadline) {
+  } else {
     statusClass = proposal.succeeded ? 'status-passed' : 'status-rejected';
     statusText = proposal.succeeded ? 'Прийнято' : 'Відхилено';
   }
@@ -263,15 +257,12 @@ async function renderProposal(proposal: ProposalData):  Promise<string> {
                 (votingActive || !proposal.succeeded);
   }
   
-  if (currentAccount && isActive) {
+  // if (currentAccount && isActive) {
+  if (currentAccount) {
     try {
-      votingStatus = await contractService.getVotingStatus(proposal.id, currentAccount);
-      const stats = await contractService.getProposalVotingStats(proposal.id);
+      votingStatus = await contractService.getVotingStatus(proposal.id, currentAccount);      
 
-      console.log(">>> stats", stats);
-      console.log(">>> isProposalSucceeded", proposal);
-      console.log(">>>> condition", !proposal.executed, !proposal.canceled, proposal.succeeded, now < deadline, queuedAt === 0);
-      
+      // console.log(">>> votingStatus", votingStatus, proposal);
       
       
       if (!votingStatus.canVote && votingStatus.reason) {
@@ -279,14 +270,16 @@ async function renderProposal(proposal: ProposalData):  Promise<string> {
       }
       if(!proposal.executed && !proposal.canceled && proposal.succeeded && now < deadline && queuedAt === 0) {
         voteInfo = `<div class="alert alert-success" style="margin-top: 10px;">
-          ✅ Пропозиція пройшла успішно! 
-          ${stats.votedFor} мешканців проголосували з загальною вагою ${stats.votedTokens} токенів.
+          ✅ Пропозиція пройшла успішно! ${votedPercent}% мешканців проголосували з загальною вагою
+          ${proposal.votesFor} токенів.
         </div>`;
-      } else {
+      } else if(!quorumReached && now > deadline) {
         voteInfo = `<div class="alert alert-error" style="margin-top: 10px;">
-          ❌ Пропозиція не набрала необхідної кількості голосів.
-          ${stats.votedFor
-      } мешканців проголосували з загальною вагою ${stats.votedTokens} токенів.
+          ❌ Кворум не досягнутий. Проголосувало ${votedPercent}% мешканців з необхідних ${80}%.
+        </div>`;
+      } else if(quorumReached && !approvalReached) {
+        voteInfo = `<div class="alert alert-error" style="margin-top: 10px;">
+          ❌ Пропозиція не набрала необхідної кількості голосів. Було отримано лише ${forPercent}% голосів з необхідних 50%.
         </div>`;
       }
     } catch (error) {
@@ -355,7 +348,7 @@ return `
       ${proposal.executed ? `
         <div class="alert alert-success" style="margin-top: 10px;">
           ✅ Виконано! Кошти переказано виконавцю.
-            Баланс виконавця до: ${executorBalance} ETH,
+            Баланс виконавця: ${executorBalance} ETH,
         </div>
       ` : ''}
 
@@ -376,10 +369,9 @@ return `
  * Завантаження мешканців
  */
 async function loadResidents() {
-  console.log(">>> loadResidents");
   const curAccount = contractService.getCurrentAccount()
   let isCurAccountAdmin = null
-
+ 
   if(curAccount) {
     isCurAccountAdmin = await contractService.isAdmin(curAccount)
   }
@@ -390,7 +382,7 @@ async function loadResidents() {
     
     for (const address of accounts.slice(0, 10)) {
       try {
-        const info = await contractService.getResidentInfo(address);
+        const info = await contractService.getResidentInfo(address);      
         
         if (info.isActive) {
           const isAdmin = await contractService.isAdmin(address);

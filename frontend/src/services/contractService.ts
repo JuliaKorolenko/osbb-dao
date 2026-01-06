@@ -160,6 +160,11 @@ class ContractService {
     console.log('🔄 Змінено акаунт на:', this.currentAccount);
   }
 
+  async getVotingPower(account: string): Promise<bigint> {
+    if (!this.tokenContract) throw new Error('Token не ініціалізовано');
+    return await this.tokenContract.balanceOf(account);
+  }
+
   /**
    * Отримати статистику DAO
    */
@@ -173,7 +178,7 @@ class ContractService {
       this.daoContract.getResidentCount(),
       this.daoContract.totalArea(),
       this.daoContract.getProposalCount(),
-      this.daoContract.getVotingPower(this.currentAccount),
+      this.getVotingPower(this.currentAccount),
       this.daoContract.getResidentInfo(this.currentAccount),
     ]);
 
@@ -188,6 +193,20 @@ class ContractService {
       votingPower: votingPower.toString(),
       userArea: Number(residentInfo.apartmentArea),
     };
+  }
+
+  async getTotalVotingPower(): Promise<bigint> {
+    if (!this.daoContract) throw new Error('DAO не ініціалізовано');
+    let totalVotingPower: bigint = BigInt(0);
+    const residents = await this.getAllResidents();
+
+    for (const resident of residents) {
+      const power = await this.getVotingPower(resident.address);
+      
+      totalVotingPower += power;
+    }
+
+    return totalVotingPower;
   }
 
   /**
@@ -240,20 +259,6 @@ class ContractService {
         console.error(`❌ Помилка отримання пропозиції #${i}:`, error);
         continue;
       }
-      
-      // const proposal = await this.daoContract.getProposal(i);
-      // proposals.push({
-      //   id: i,
-      //   description: proposal.description,
-      //   amount: proposal.amount,
-      //   executor: proposal.executor,
-      //   deadline: proposal.deadline,
-      //   votesFor: proposal.votesFor,
-      //   votesAgainst: proposal.votesAgainst,
-      //   executed: proposal.executed,
-      //   canceled: proposal.canceled,
-      //   succeeded: proposal.succeeded
-      // });
     }
 
     return proposals;
@@ -449,20 +454,6 @@ class ContractService {
     return residentsArray;
  }
 
- /**
- * Перевірити чи проголосував резидент за пропозицію
- */
-  async hasVoted(proposalId: number, voterAddress: string): Promise<boolean> {
-    if (!this.daoContract) throw new Error('DAO не ініціалізовано');
-    
-    try {
-      return await this.daoContract.isVoted(proposalId, voterAddress);
-    } catch (error) {
-      console.error('Помилка перевірки голосування:', error);
-      return false;
-    }
-  }
-
   /**
  * Отримати інформацію про голос
  */
@@ -614,40 +605,8 @@ class ContractService {
   }
 
    /**
-   * Отримати детальну статистику голосування
+   * Поставити у чергу пропозицію після успішного голосування
    */
-  async getProposalVotingStats(proposalId: number): Promise<{
-    totalSupply: bigint;
-    votedTokens: bigint;
-    votedFor: bigint;
-    votedAgainst: bigint;
-    participationRate: bigint;
-    requiredQuorum: bigint;
-    requiredApproval: bigint;
-    quorumReached: boolean;
-    approvalReached: boolean;
-    allVoted: boolean;
-  }> {
-    if (!this.daoContract) throw new Error('DAO не ініціалізовано');
-
-    const stats = await this.daoContract.getProposalVotingStats(proposalId);
-    
-    return {
-      totalSupply: stats.totalSupply,
-      votedTokens: stats.votedTokens,
-      votedFor: stats.votedFor,
-      votedAgainst: stats.votedAgainst,
-      participationRate: stats.participationRate,
-      requiredQuorum: stats.requiredQuorum,
-      requiredApproval: stats.requiredApproval,
-      quorumReached: stats.quorumReached,
-      approvalReached: stats.approvalReached,
-      allVoted: stats.allVoted
-    };
-  }
-
-
-  // 
   async queuedAt (proposalId: number): Promise<number> {
     if (!this.daoContract) throw new Error('DAO не ініціалізовано'); 
     const timestamp: bigint = await this.daoContract.queuedAt(proposalId);
@@ -667,17 +626,6 @@ class ContractService {
     const delay: bigint = await this.daoContract.TIMELOCK_DELAY();
     return Number(delay);
   }
-
-  // getTimeLeftToExecute(queuedAt: number, timelockDelay: number): number {
-  //   const executeAt = queuedAt + timelockDelay;
-
-  //   setInterval(() => {
-  //     const now = Math.floor(Date.now() / 1000);
-  //     return executeAt - now;
-  //    }, 1000);
-  //   const timeLeft = executeAt - Math.floor(Date.now() / 1000);
-  //   return timeLeft > 0 ? timeLeft : 0;
-  // }
 
 /**
  * Перемотка времени в Hardhat Network (только для разработки!)

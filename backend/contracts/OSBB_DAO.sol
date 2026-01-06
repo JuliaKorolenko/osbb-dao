@@ -78,19 +78,19 @@ contract OSBB_DAO is AccessControl, ReentrancyGuard {
         bool canceled;
     }
 
-    struct ProposalView {
-      uint256 id;
-      string description;
-      uint256 votesFor;
-      uint256 votesAgainst;
-      uint256 snapshotId;
-      uint256 deadline;
-      uint256 queuedAt;
-      bool executed;
-      bool canceled;
-      ProposalState state;
-      bool passed;
-  }
+  //   struct ProposalView {
+  //     uint256 id;
+  //     string description;
+  //     uint256 votesFor;
+  //     uint256 votesAgainst;
+  //     uint256 snapshotId;
+  //     uint256 deadline;
+  //     uint256 queuedAt;
+  //     bool executed;
+  //     bool canceled;
+  //     ProposalState state;
+  //     bool passed;
+  // }
     
     // Структура запису про голосування
     struct VoteReceipt {
@@ -123,17 +123,6 @@ contract OSBB_DAO is AccessControl, ReentrancyGuard {
     mapping(uint256 => uint256) public queuedAt;
     
     address[] public residentList;
-
-    enum ProposalState {
-      Active,      // голосование идёт
-      Defeated,    // голосование завершено, но не прошло
-      Succeeded,   // прошло голосование, но ещё не queued
-      Queued,      // поставлено в очередь (timelock идёт)
-      Executable,  // timelock закончился, можно исполнять
-      Executed,    // исполнено
-      Canceled     // отменено
-    }
-
     
     // Події
     event ResidentRegistered(address indexed resident, uint256 apartmentArea, uint256 votingPower);
@@ -225,11 +214,8 @@ contract OSBB_DAO is AccessControl, ReentrancyGuard {
     
     function getBalance() external view returns (uint256) {
       return address(this).balance;
-    }
-    
-    function getVotingPower(address _resident) public view returns (uint256) {
-      return governanceToken.balanceOf(_resident);
-    }
+    }    
+
     
     function createProposal(
       string memory _description,
@@ -306,100 +292,7 @@ contract OSBB_DAO is AccessControl, ReentrancyGuard {
       
       return _proposalPassed(_proposalId);
     }
-
-     /**
-     * @dev Детальна інформація про стан голосування
-     */
-    function getProposalVotingStats(uint256 _proposalId) 
-        external 
-        view 
-        proposalExists(_proposalId)
-        returns (
-            uint256 totalSupply,
-            uint256 votedTokens,
-            uint256 votedFor,
-            uint256 votedAgainst,
-            uint256 participationRate,
-            uint256 requiredQuorum,
-            uint256 requiredApproval,
-            bool quorumReached,
-            bool approvalReached,
-            bool allVoted
-        )
-    {
-      Proposal storage proposal = proposals[_proposalId];
-      
-      totalSupply = governanceToken.getPastTotalSupply(proposal.snapshotId);
-      votedFor = proposal.votesFor;
-      votedAgainst = proposal.votesAgainst;
-      votedTokens = votedFor + votedAgainst;
-      
-      requiredQuorum = QUORUM_PERCENTAGE;
-      requiredApproval = APPROVAL_THRESHOLD;
-        
-      if (totalSupply > 0) {
-          participationRate = (votedTokens * 100) / totalSupply;
-          quorumReached = participationRate >= requiredQuorum;
-          allVoted = votedTokens == totalSupply;
-      } else {
-          participationRate = 0;
-          quorumReached = false;
-          allVoted = false;
-      }
-        
-      if (votedTokens > 0) {
-          approvalReached = (votedFor * 100) > (votedTokens * requiredApproval);
-      } else {
-          approvalReached = false;
-      }
-      
-      return (
-        totalSupply,
-        votedTokens,
-        votedFor,
-        votedAgainst,
-        participationRate,
-        requiredQuorum,
-        requiredApproval,
-        quorumReached,
-        approvalReached,
-        allVoted
-      );
-    }
-
-    /**
-     * @dev Перевірити чи всі резиденти проголосували
-     */
-    // function checkAllResidentsVoted(uint256 _proposalId)
-    //     external
-    //     view
-    //     proposalExists(_proposalId)
-    //     returns (
-    //         bool allVoted,
-    //         uint256 votedCount,
-    //         uint256 totalCount
-    //     )
-    // {
-    //     Proposal storage proposal = proposals[_proposalId];
-    //     uint256 voted = 0;
-    //     uint256 total = 0;
-        
-    //     for (uint256 i = 0; i < residentList.length; i++) {
-    //         address resident = residentList[i];
-    //         uint256 votingPower = governanceToken.getPastVotes(resident, proposal.snapshotId);
-            
-    //         if (votingPower > 0) {
-    //             total++;
-    //             if (voteReceipts[_proposalId][resident].hasVoted) {
-    //                 voted++;
-    //             }
-    //         }
-    //     }
-        
-    //     allVoted = (total > 0) && (voted == total);
-        
-    //     return (allVoted, voted, total);
-    // }
+   
     
     function queueProposal(uint256 _proposalId)
         external
@@ -467,7 +360,6 @@ contract OSBB_DAO is AccessControl, ReentrancyGuard {
       
     /**
      * @dev Отримання детальної інформації про пропозицію
-     * ТЕПЕР БЕЗ маппінгу - можна повертати!
      */
     function getProposal(uint256 proposalId)
         external
@@ -489,7 +381,6 @@ contract OSBB_DAO is AccessControl, ReentrancyGuard {
     {
         Proposal storage proposal = proposals[proposalId];
 
-        // ProposalState state = getProposalState(proposalId);
         bool passed = _proposalPassed(proposalId);
 
         return (
@@ -505,61 +396,6 @@ contract OSBB_DAO is AccessControl, ReentrancyGuard {
           passed,
           proposal.snapshotId
         );
-
-        // return ProposalView({
-        //   id: proposalId,
-        //   description: proposal.description,
-        //   votesFor: proposal.votesFor,
-        //   votesAgainst: proposal.votesAgainst,
-        //   snapshotId: proposal.snapshotId,
-        //   deadline: proposal.deadline,
-        //   queuedAt: queuedAt[proposalId],
-        //   executed: proposal.executed,
-        //   canceled: proposal.canceled,
-        //   state: state,
-        //   passed: passed
-        // });
-    }
-
-    
-    function getProposalState(uint256 proposalId)
-        public
-        view
-        proposalExists(proposalId)
-        returns (ProposalState)
-    {
-        Proposal storage proposal = proposals[proposalId];
-
-        if (proposal.canceled) {
-            return ProposalState.Canceled;
-        }
-
-        if (proposal.executed) {
-            return ProposalState.Executed;
-        }
-
-        // голосование ещё идёт
-        if (block.timestamp <= proposal.deadline) {
-            return ProposalState.Active;
-        }
-
-        // голосование завершено, но не прошло
-        if (!_proposalPassed(proposalId)) {
-            return ProposalState.Defeated;
-        }
-
-        // прошло голосование, но ещё не queued
-        if (queuedAt[proposalId] == 0) {
-            return ProposalState.Succeeded;
-        }
-
-        // timelock ещё идёт
-        if (block.timestamp < queuedAt[proposalId] + TIMELOCK_DELAY) {
-            return ProposalState.Queued;
-        }
-
-        // timelock закончился
-        return ProposalState.Executable;
     }
 
     
@@ -586,25 +422,13 @@ contract OSBB_DAO is AccessControl, ReentrancyGuard {
         Resident memory resident = residents[_resident];
         return (
             resident.apartmentArea,
-            getVotingPower(_resident),
+            governanceToken.balanceOf(_resident),
             resident.isActive
         );
     }
 
     /**
-     * @dev Перевірити чи проголосував користувач (тепер через окремий маппінг)
-     */
-    function isVoted(uint256 _proposalId, address _voter) 
-        external 
-        view 
-        proposalExists(_proposalId) 
-        returns (bool) 
-    {
-        return voteReceipts[_proposalId][_voter].hasVoted;
-    }
-
-    /**
-     * @dev Отримати інформацію про голос (тепер через окремий маппінг)
+     * @dev Отримати інформацію про голос
      */
     function getVoteReceipt(uint256 _proposalId, address _voter)
         external
@@ -616,6 +440,7 @@ contract OSBB_DAO is AccessControl, ReentrancyGuard {
         return (receipt.hasVoted, receipt.support, receipt.votes);
     }
 
+
     function _proposalPassed(uint256 proposalId)
       internal
       view
@@ -624,8 +449,7 @@ contract OSBB_DAO is AccessControl, ReentrancyGuard {
       Proposal storage proposal = proposals[proposalId];
 
       uint256 totalVotes = proposal.votesFor + proposal.votesAgainst;
-
-      // защита от деления на ноль
+      
       if (totalVotes == 0) {
           return false;
       }
