@@ -16,7 +16,7 @@ contract OSBB_Token is ERC20, ERC20Permit, ERC20Votes, AccessControl {
     bytes32 public constant MINTER_ROLE = keccak256("MINTER_ROLE");
 
     constructor()
-        ERC20("OSBB Voting Token", "OSBB")
+        ERC20("OSBB Voting Token", "OSBBGT")
         ERC20Permit("OSBB Voting Token")
     {
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
@@ -77,20 +77,6 @@ contract OSBB_DAO is AccessControl, ReentrancyGuard {
         bool executed;
         bool canceled;
     }
-
-  //   struct ProposalView {
-  //     uint256 id;
-  //     string description;
-  //     uint256 votesFor;
-  //     uint256 votesAgainst;
-  //     uint256 snapshotId;
-  //     uint256 deadline;
-  //     uint256 queuedAt;
-  //     bool executed;
-  //     bool canceled;
-  //     ProposalState state;
-  //     bool passed;
-  // }
     
     // Структура запису про голосування
     struct VoteReceipt {
