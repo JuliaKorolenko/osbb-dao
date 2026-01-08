@@ -130,21 +130,93 @@ describe.only('OSBB_DAO', function () {
     });
   });
 
-
   describe('Resident Removal', function () {
-    console.log(">>> tests of removing resinents, coming soon...");
-    
-    // it('Should create proposals correctly', async function () {
-    //   // Test logic goes here
-    // });
+
+    beforeEach(async function () {
+      await osbbDAO.registerResident(await member1.getAddress(), APPARTMENT_AREA_1);
+      await osbbDAO.registerResident(await member2.getAddress(), APPARTMENT_AREA_2);
+    });
+
+
+    it('Should remove a resident correctly', async function () {
+      const votingPower = APPARTMENT_AREA_1 * TOKENS_PER_SQM;
+      const residentAddress1 = await member1.getAddress();
+
+      await expect(osbbDAO.removeResident(residentAddress1))
+        .to.emit(osbbDAO, 'ResidentRemoved')
+        .withArgs(residentAddress1, votingPower);
+
+      const residentInfo = await osbbDAO.getResidentInfo(residentAddress1);
+
+      expect(residentInfo.isActive).to.be.false;
+      expect(residentInfo.votingPower).to.equal(0);
+
+      expect(await osbbDAO.totalArea()).to.equal(APPARTMENT_AREA_2);
+      expect(await osbbDAO.getResidentCount()).to.equal(1);
+    });
+
+    it('Should burn governance tokens when removing resident', async function () {
+      const residentAddress1 = await member1.getAddress();
+
+      await osbbDAO.removeResident(residentAddress1);
+      expect(await governanceToken.balanceOf(residentAddress1)).to.equal(0n);
+    });
+
+    it('Should revert when removing non-existent resident', async function () {
+      await expect(osbbDAO.removeResident(await member3.getAddress()))
+        .to.be.revertedWith("Meshkanets ne zareyestrovanyy");
+    });
+
+    it('Should revert if non-admin tries to remove resident', async function () {
+      await expect(
+        osbbDAO.connect(member1).removeResident(await member2.getAddress())
+      ).to.be.revertedWithCustomError(osbbDAO, "AccessControlUnauthorizedAccount");
+    });
   });
 
-
   describe('Fund Deposits', function () {
-    console.log(">>> tests of deposits, coming soon...");
-    // it('Should create proposals correctly', async function () {
-    //   // Test logic goes here
-    // });
+    it('Should accept deposits via depositFunds correctly', async function () {
+      const depositAmount = ethers.parseEther("0.5");
+
+      await expect(osbbDAO.depositFunds({ value: depositAmount }))
+        .to.emit(osbbDAO, 'FundsDeposited')
+        .withArgs(owner.getAddress(), depositAmount);
+
+      expect(await osbbDAO.getBalance()).to.equal(depositAmount);
+      // console.log(">>> cur balance:", await osbbDAO.getBalance(), await governanceToken.balanceOf('0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266'));
+
+      // console.log(">>> test depositFunds passed", await owner.getAddress());
+      // console.log(">>> test depositFunds passed", osbbDAO);
+      
+    });
+
+    it('Should accumulate funds correctly', async function () {
+      const depositAmount1 = ethers.parseEther("1.0");
+      const depositAmount2 = ethers.parseEther("0.5");
+
+      await osbbDAO.depositFunds({ value: depositAmount1 });
+      await osbbDAO.depositFunds({ value: depositAmount2 });
+
+      expect(await osbbDAO.getBalance()).to.equal(depositAmount1 + depositAmount2);
+    });
+
+    it('Should revert with zero deposit', async function () {
+      await expect(osbbDAO.depositFunds({ value: 0n }))
+        .to.be.revertedWith("Suma maye buty bilshe 0");
+    });
+
+    it('Should accept deposits via direct ETH transfer', async function () {
+      const depositAmount = ethers.parseEther("0.75");
+
+      await expect(owner.sendTransaction({
+        to: await osbbDAO.getAddress(),
+        value: depositAmount
+      }))
+        .to.emit(osbbDAO, 'FundsDeposited')
+        .withArgs(await owner.getAddress(), depositAmount);
+        
+      expect(await osbbDAO.getBalance()).to.equal(depositAmount);
+    });
   });
 
   describe('Proposal Creation', function () {
