@@ -220,14 +220,17 @@ async function renderProposal(proposal: ProposalData):  Promise<string> {
   const executeAt = Number(queuedAt + timedelay);  
   
   let statusClass = 'status-active';
-  let statusText = 'Активна';
-  
+  let statusText = 'Активна';  
+
   if (proposal.executed) {
     statusClass = 'status-passed';
     statusText = 'Виконано';
   } else if (proposal.canceled) {
     statusClass = 'status-rejected';
     statusText = 'Скасовано';
+  } else if (isActive) {
+    statusClass = 'status-active';
+    statusText = 'Активна';
   } else {
     statusClass = proposal.succeeded ? 'status-passed' : 'status-rejected';
     statusText = proposal.succeeded ? 'Прийнято' : 'Відхилено';
@@ -262,7 +265,7 @@ async function renderProposal(proposal: ProposalData):  Promise<string> {
     try {
       votingStatus = await contractService.getVotingStatus(proposal.id, currentAccount);      
 
-      // console.log(">>> votingStatus", votingStatus, proposal);
+      console.log(">>> votingStatus", votingStatus, proposal);
       
       
       if (!votingStatus.canVote && votingStatus.reason) {
@@ -277,7 +280,7 @@ async function renderProposal(proposal: ProposalData):  Promise<string> {
         voteInfo = `<div class="alert alert-error" style="margin-top: 10px;">
           ❌ Кворум не досягнутий. Проголосувало ${votedPercent}% мешканців з необхідних ${80}%.
         </div>`;
-      } else if(quorumReached && !approvalReached) {
+      } else if(quorumReached && !approvalReached  && now > deadline) {
         voteInfo = `<div class="alert alert-error" style="margin-top: 10px;">
           ❌ Пропозиція не набрала необхідної кількості голосів. Було отримано лише ${forPercent}% голосів з необхідних 50%.
         </div>`;
