@@ -183,11 +183,6 @@ describe.only('OSBB_DAO', function () {
         .withArgs(owner.getAddress(), depositAmount);
 
       expect(await osbbDAO.getBalance()).to.equal(depositAmount);
-      // console.log(">>> cur balance:", await osbbDAO.getBalance(), await governanceToken.balanceOf('0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266'));
-
-      // console.log(">>> test depositFunds passed", await owner.getAddress());
-      // console.log(">>> test depositFunds passed", osbbDAO);
-      
     });
 
     it('Should accumulate funds correctly', async function () {
@@ -220,10 +215,118 @@ describe.only('OSBB_DAO', function () {
   });
 
   describe('Proposal Creation', function () {
-    console.log(">>> tests of proposals creation, coming soon...");
-    // it('Should create proposals correctly', async function () {
-    //   // Test logic goes here
-    // });
+    beforeEach(async function () {
+      await osbbDAO.registerResident(await member1.getAddress(), APPARTMENT_AREA_1);
+      await osbbDAO.depositFunds({ value: ethers.parseEther("10") });
+    });
+
+    it('Should create a proposal correctly', async function () {
+      const proposalDescription = "Fix the roof";
+      const proposalAmount = ethers.parseEther("2");
+      const votingDuration = MIN_VOTING_DURATION;
+      const executorAddress = await executor.getAddress();
+
+      await expect(
+        osbbDAO.connect(member1).createProposal(
+        proposalDescription,
+        proposalAmount,
+        executorAddress,
+        votingDuration
+      )).to.emit(osbbDAO, 'ProposalCreated');
+
+      const proposal = await osbbDAO.proposals(1);
+
+      expect(proposal.description).to.equal(proposalDescription);
+      expect(proposal.amount).to.equal(proposalAmount);
+      expect(proposal.executor).to.equal(executorAddress);
+      expect(proposal.executed).to.be.false;
+      expect(proposal.canceled).to.be.false;
+    });
+
+    it('Should increment proposal counter', async function () {
+
+      await osbbDAO.connect(member1).createProposal(
+        "Proposal 1",
+        ethers.parseEther("1"),
+        await executor.getAddress(),
+        MIN_VOTING_DURATION
+      );
+
+      await osbbDAO.connect(member1).createProposal(
+        "Proposal 2",
+        ethers.parseEther("1"),
+        await executor.getAddress(),
+        MIN_VOTING_DURATION
+      );
+      expect(await osbbDAO.getProposalCount()).to.equal(2);
+    });
+
+    it('Should revert if non-resident tries to create proposal', async function () {
+      await expect(
+        osbbDAO.connect(member2).createProposal(
+          "Unauthorized Proposal",
+          ethers.parseEther("1"),
+          await executor.getAddress(),
+          MIN_VOTING_DURATION
+        )
+      ).to.be.revertedWith("U vas nemaye prava stvoruvaty propozytsiyi");
+    });
+
+    it('Should revert with zero amount', async function () {
+      await expect(
+        osbbDAO.connect(member1).createProposal(
+          "Zero Amount Proposal",
+          0n,
+          await executor.getAddress(),
+          MIN_VOTING_DURATION
+        )
+      ).to.be.revertedWith("Suma maye buty bilshe 0");
+    });
+
+    it('Should revert with amount exceeding balance', async function () {
+      await expect(
+        osbbDAO.connect(member1).createProposal(
+          "Excessive Amount Proposal",
+          ethers.parseEther("20"),
+          await executor.getAddress(),
+          MIN_VOTING_DURATION
+        )
+      ).to.be.revertedWith("Nedostatno koshtiv u fondi");
+    });
+
+    it('Should revert with invalid executor address', async function () {
+      await expect(
+        osbbDAO.connect(member1).createProposal(
+          "Invalid Executor Proposal",
+          ethers.parseEther("1"),
+          ethers.ZeroAddress,
+          MIN_VOTING_DURATION
+        )
+      ).to.be.revertedWith("Nevirna adresa vykonavtsya");
+    });
+
+    it('Should revert with too short voting duration', async function () {
+      await expect(
+        osbbDAO.connect(member1).createProposal(
+          "Short Voting Duration Proposal",
+          ethers.parseEther("1"),
+          await executor.getAddress(),
+          MIN_VOTING_DURATION - 1n
+        )
+      ).to.be.revertedWith("Period holosuvannya zamalo");
+    });
+
+    it('Should revert with empty description', async function () {
+      await expect(
+        osbbDAO.connect(member1).createProposal(
+          "",
+          ethers.parseEther("1"),
+          await executor.getAddress(),
+          MIN_VOTING_DURATION
+        )
+      ).to.be.revertedWith("Opys ne mozhe buty porozhnim");
+    });
+
   });
 
   describe('Voting', function () {
