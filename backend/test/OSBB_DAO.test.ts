@@ -430,7 +430,6 @@ describe.only('OSBB_DAO', function () {
     });
   });
 
-
   describe('Is proposal successful', function () {
     let proposalId: bigint;
 
@@ -538,28 +537,290 @@ describe.only('OSBB_DAO', function () {
   });
 
   describe('Proposal Queue', function () {
-    console.log(">>> tests of proposal queue, coming soon...");
-    // it('Should create proposals correctly', async function () {
-    //   // Test logic goes here
-    // });
+    let proposalId: bigint;
+
+    beforeEach(async function () {
+      const member1Address = await member1.getAddress();
+      const member2Address = await member2.getAddress();
+      const member3Address = await member3.getAddress();
+
+      await osbbDAO.registerResident(member1Address, APPARTMENT_AREA_1); // 50m² = 5000 tokens
+      await osbbDAO.registerResident(member2Address, APPARTMENT_AREA_2); // 75m² = 7500 tokens
+      await osbbDAO.registerResident(member3Address, APPARTMENT_AREA_3); // 100m² = 10000 tokens
+      // Total: 225m² = 22500 tokens
+
+      await osbbDAO.depositFunds({ value: ethers.parseEther("10") });
+
+      // Delegare voting power
+      await governanceToken.connect(member1).delegate(member1Address);
+      await governanceToken.connect(member2).delegate(member2Address);
+      await governanceToken.connect(member3).delegate(member3Address);
+
+      // Mine a block to ensure delegation is recorded
+      await ethers.provider.send("evm_mine", []);
+
+      proposalId = await osbbDAO.getProposalCount() + 1n;
+
+      await osbbDAO.connect(member1).createProposal(
+        "Test Proposal",
+        ethers.parseEther("1"),
+        await executor.getAddress(),
+        MIN_VOTING_DURATION
+      );
+
+      // Mine a block so voting can start
+      await ethers.provider.send("evm_mine", []);
+
+      await osbbDAO.connect(member1).castVote(proposalId, true);
+      await osbbDAO.connect(member2).castVote(proposalId, true);
+      await osbbDAO.connect(member3).castVote(proposalId, true);
+
+      await ethers.provider.send("evm_increaseTime", [Number(MIN_VOTING_DURATION)]);
+    });
+
+    it('Should queue a successful proposal', async function () {
+      await expect(osbbDAO.queueProposal(proposalId))
+        .to.emit(osbbDAO, 'ProposalQueued');
+
+      const queueTime = await osbbDAO.queuedAt(proposalId);
+      
+      // expect(queueTime).to.be.greaterThan(0n);
+      expect(queueTime).to.be.gt(0);
+    });
+
+    it('Should revert queueing before voting ends', async function () {
+      const proposalId = await osbbDAO.getProposalCount() + 1n;
+
+      await osbbDAO.connect(member1).createProposal(
+        "Test Proposal",
+        ethers.parseEther("1"),
+        await executor.getAddress(),
+        MIN_VOTING_DURATION
+      );
+      
+      await expect(osbbDAO.queueProposal(proposalId))
+        .to.be.revertedWith("Voting not finished");
+    });
+
+    it('Should  revert queueing failed proposals', async function () {
+      const proposalId = await osbbDAO.getProposalCount() + 1n;
+
+      await osbbDAO.connect(member1).createProposal(
+        "Test Proposal",
+        ethers.parseEther("1"),
+        await executor.getAddress(),
+        MIN_VOTING_DURATION
+      );
+
+      await ethers.provider.send("evm_mine", []);
+
+      await osbbDAO.connect(member1).castVote(proposalId, false);
+      await osbbDAO.connect(member2).castVote(proposalId, false);
+      await osbbDAO.connect(member3).castVote(proposalId, false);
+
+      await ethers.provider.send("evm_increaseTime", [Number(MIN_VOTING_DURATION)]);
+
+      await expect(osbbDAO.queueProposal(proposalId))
+        .to.be.revertedWith("Proposal not passed");
+    });
+
+    it('Should revert queueing twice', async function () {
+      await osbbDAO.queueProposal(proposalId);
+
+      await expect(osbbDAO.queueProposal(proposalId))
+        .to.be.revertedWith("Already queued");
+    });
+
   });
 
   describe('Proposal Execution', function () {
-    console.log(">>> tests of proposal execution, coming soon...");
+    let proposalId: bigint;
+
+    beforeEach(async function () {
+      const member1Address = await member1.getAddress();
+      const member2Address = await member2.getAddress();
+      const member3Address = await member3.getAddress();
+
+      await osbbDAO.registerResident(member1Address, APPARTMENT_AREA_1);
+      await osbbDAO.registerResident(member2Address, APPARTMENT_AREA_2);
+      await osbbDAO.registerResident(member3Address, APPARTMENT_AREA_3);
+
+      await osbbDAO.depositFunds({ value: ethers.parseEther("10") });
+
+      // Delegare voting power
+      await governanceToken.connect(member1).delegate(member1Address);
+      await governanceToken.connect(member2).delegate(member2Address);
+      await governanceToken.connect(member3).delegate(member3Address);
+
+      // Mine a block to ensure delegation is recorded
+      await ethers.provider.send("evm_mine", []);
+
+      proposalId = await osbbDAO.getProposalCount() + 1n;
+
+      await osbbDAO.connect(member1).createProposal(
+        "Test Proposal",
+        ethers.parseEther("1"),
+        await executor.getAddress(),
+        MIN_VOTING_DURATION
+      );
+
+      // Mine a block so voting can start
+      await ethers.provider.send("evm_mine", []);
+
+      await osbbDAO.connect(member1).castVote(proposalId, true);
+      await osbbDAO.connect(member2).castVote(proposalId, true);
+      await osbbDAO.connect(member3).castVote(proposalId, true);
+
+      await ethers.provider.send("evm_increaseTime", [Number(MIN_VOTING_DURATION)]);
+
+      await osbbDAO.queueProposal(proposalId);
+    });
+    
+    it('Should execute proposal after timelock', async function () {
+      await ethers.provider.send("evm_increaseTime", [Number(TIMELOCK_DELAY)]);
+
+      const executorBalanceBefore = await ethers.provider.getBalance(await executor.getAddress());
+      const proposalAmount = ethers.parseEther("1");
+
+      await expect(osbbDAO.executeProposal(proposalId))
+        .to.emit(osbbDAO, 'ProposalExecuted')
+        .withArgs(proposalId, await executor.getAddress(), proposalAmount);
+
+      const executorBalanceAfter = await ethers.provider.getBalance(await executor.getAddress());
+
+      expect(executorBalanceAfter).to.equal(executorBalanceBefore + proposalAmount);
+
+      const proposal = await osbbDAO.getProposal(proposalId);
+      expect(proposal.executed).to.be.true;
+    });
+
+    it('Should revert executing proposal before timelock', async function () {
+      await expect(osbbDAO.executeProposal(proposalId))
+        .to.be.revertedWith("Timelock not expired");
+    });
+    
+    it('Should revert executing without queue', async function () {
+      // Create a new proposal that is not queued
+      const newProposalId = await osbbDAO.getProposalCount() + 1n;
+
+      await osbbDAO.connect(member1).createProposal(
+        "Test Proposal",
+        ethers.parseEther("1"),
+        await executor.getAddress(),
+        MIN_VOTING_DURATION
+      );
+
+      // Mine a block so voting can start
+      await ethers.provider.send("evm_mine", []);
+
+      await osbbDAO.connect(member1).castVote(newProposalId, true);
+      await osbbDAO.connect(member2).castVote(newProposalId, true);
+      await osbbDAO.connect(member3).castVote(newProposalId, true);
+
+      await ethers.provider.send("evm_increaseTime", [Number(MIN_VOTING_DURATION + TIMELOCK_DELAY)]);
+
+      await expect(osbbDAO.executeProposal(newProposalId))
+        .to.be.revertedWith("Proposal not queued");
+    });
+
+    it('Should revert executing twice', async function () {
+      await ethers.provider.send("evm_increaseTime", [Number(TIMELOCK_DELAY)]);
+
+      await osbbDAO.executeProposal(proposalId);
+
+      await expect(osbbDAO.executeProposal(proposalId))
+        .to.be.revertedWith("Already executed");
+    });
+    
+    it('Should revert if insufficient funds', async function () {
+      const largeProposalId = await osbbDAO.getProposalCount() + 1n;
+
+      await osbbDAO.connect(member1).createProposal(
+        "Test Proposal",
+        ethers.parseEther("10"),
+        await executor.getAddress(),
+        MIN_VOTING_DURATION
+      );
+
+      await ethers.provider.send("evm_mine", []);
+
+      await osbbDAO.connect(member1).castVote(largeProposalId, true);
+      await osbbDAO.connect(member2).castVote(largeProposalId, true);
+      await osbbDAO.connect(member3).castVote(largeProposalId, true);
+
+      await ethers.provider.send("evm_increaseTime", [Number(MIN_VOTING_DURATION)]);
+      await osbbDAO.queueProposal(largeProposalId);
+
+      await ethers.provider.send("evm_increaseTime", [Number(TIMELOCK_DELAY)]);
+
+      await osbbDAO.executeProposal(proposalId); // execute first proposal to reduce funds
+
+      await expect(osbbDAO.executeProposal(largeProposalId))
+        .to.be.revertedWith("Not enough funds");
+    }); 
+  });
+
+
+
+  describe('Proposal Cancelation', function () {
+    let proposalId: bigint;
+
+    beforeEach(async function () {
+      const member1Address = await member1.getAddress();
+
+      await osbbDAO.registerResident(member1Address, APPARTMENT_AREA_1);
+      await osbbDAO.depositFunds({ value: ethers.parseEther("10") });
+
+      await governanceToken.connect(member1).delegate(member1Address);
+  
+      await ethers.provider.send("evm_mine", []);
+
+      proposalId = await osbbDAO.getProposalCount() + 1n;
+
+      await osbbDAO.connect(member1).createProposal(
+        "Test Proposal",
+        ethers.parseEther("1"),
+        await executor.getAddress(),
+        MIN_VOTING_DURATION
+      );
+    });
+
+    it('Should allow admin to cancel active proposal', async function () {
+      await expect(osbbDAO.cancelProposal(proposalId))
+        .to.emit(osbbDAO, 'ProposalCanceled')
+        .withArgs(proposalId);
+
+      const proposal = await osbbDAO.getProposal(proposalId);
+      expect(proposal.canceled).to.be.true;
+    });
+
+    it('Should allow canceling failed proposal after voting', async function () {
+      await ethers.provider.send("evm_mine", []);
+
+      await osbbDAO.connect(member1).castVote(proposalId, false);
+
+      await ethers.provider.send("evm_increaseTime", [Number(MIN_VOTING_DURATION)]);
+
+      await expect(osbbDAO.cancelProposal(proposalId))
+        .to.emit(osbbDAO, 'ProposalCanceled')
+        .withArgs(proposalId);
+    });
+
+    it('Should prevent canceling queued proposal', async function () {
+      // Test logic goes here
+    });
+
+    // it('Should create proposals correctly', async function () {
+    //   // Test logic goes here
+    // });
+
     // it('Should create proposals correctly', async function () {
     //   // Test logic goes here
     // });
   });
 
-  describe('Proposal Cancelation', function () {
-    console.log(">>> tests of proposal cancelation, coming soon...");
-    // it('Should create proposals correctly', async function () {
-    //   // Test logic goes here
-    // });
-  });
-
-  describe('Proposal Cancelation', function () {
-    console.log(">>> tests of proposal cancelation, coming soon...");
+  describe('Non-transferable Tokens', function () {
+    console.log(">>> tests of Non-transferable Tokens, coming soon...");
     // it('Should create proposals correctly', async function () {
     //   // Test logic goes here
     // });
