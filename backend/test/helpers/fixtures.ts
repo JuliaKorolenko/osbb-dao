@@ -1,7 +1,7 @@
 import { network } from "hardhat";
 const { ethers } = await network.connect();
 
-export async function deployFixture() {
+async function deployFixture() {
   const [owner, member1, member2, member3, executor] =
     await ethers.getSigners();
 
@@ -24,3 +24,7 @@ export async function deployFixture() {
     executor,
   };
 }
+
+type DaoFixture = Awaited<ReturnType<typeof deployFixture>>;
+
+export { type DaoFixture, ethers, deployFixture };

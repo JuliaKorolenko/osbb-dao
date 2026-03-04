@@ -33,19 +33,36 @@ export const createProposal = async (
   opts: {
     description?: string;
     amount?: bigint;
-    executer: string;
+    executor: string;
     duration?: bigint;
   },
-): Promise<bigint> => {
+): Promise<{ id: bigint; tx: any }> => {
   const id = (await osbbDAO.getProposalCount()) + 1n;
-  await osbbDAO
+
+  const args = {
+    description: opts.description ?? "Test Proposal",
+    amount: opts.amount ?? ethers.parseEther("1"),
+    executor: opts.executor,
+    duration: opts.duration ?? MIN_VOTING_DURATION,
+  };
+
+  return osbbDAO
     .connect(proposer)
     .createProposal(
-      opts.description ?? "Test Proposal",
-      opts.amount ?? ethers.parseEther("1"),
-      opts.executer,
-      opts.duration ?? MIN_VOTING_DURATION,
+      args.description,
+      args.amount,
+      args.executor,
+      args.duration,
     );
-  await mine();
-  return id;
+
+  // const tx = await osbbDAO
+  //   .connect(proposer)
+  //   .createProposal(
+  //     args.description,
+  //     args.amount,
+  //     args.executor,
+  //     args.duration,
+  //   );
+  // await mine();
+  // return { id, tx };
 };
