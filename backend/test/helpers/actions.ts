@@ -1,33 +1,34 @@
 import { type Signer } from "ethers";
-import { network } from "hardhat";
 import { MIN_VOTING_DURATION } from "./constants.js";
-
-const { ethers } = await network.connect();
+import { ethers } from "./fixtures.js";
 
 /** Mine a single empty block */
-export const mine = () => ethers.provider.send("evm_mine", []);
+const mine = () => ethers.provider.send("evm_mine", []);
 
 /** Fast-forward EVM time and mine a block */
-export const increaseTime = async (seconds: bigint | number) => {
+const increaseTime = async (seconds: bigint | number) => {
   await ethers.provider.send("evm_increaseTime", [Number(seconds)]);
   await mine();
 };
 
 /** Register residents and self-delegate their tokens */
-export const registerResidents = async (
+const setupResidents = async (
   osbbDAO: any,
+  governanceToken: any,
   residents: Array<{ signer: Signer; area: bigint | number }>,
 ) => {
   for (const { signer, area } of residents) {
     const address = await signer.getAddress();
+
     await osbbDAO.registerResident(address, area);
+    await governanceToken.connect(signer).delegate(address);
   }
 
-  await mine();
+  // await mine();
 };
 
 /** Create a proposal and return its id */
-export const createProposal = async (
+const createProposal = async (
   osbbDAO: any,
   proposer: Signer,
   opts: {
@@ -65,4 +66,24 @@ export const createProposal = async (
   //   );
   // await mine();
   // return { id, tx };
+};
+
+/** Cast votes from multiple signers */
+async function castVotes(
+  osbbDAO: any,
+  proposalId: bigint,
+  votes: Array<{ signer: Signer; support: boolean }>,
+) {
+  for (const { signer, support } of votes) {
+    await osbbDAO.connect(signer).castVote(proposalId, support);
+  }
+}
+
+export {
+  ethers,
+  mine,
+  increaseTime,
+  setupResidents,
+  createProposal,
+  castVotes,
 };

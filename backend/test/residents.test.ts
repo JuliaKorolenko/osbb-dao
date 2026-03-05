@@ -1,7 +1,7 @@
 import { expect } from "chai";
 import { ethers, type DaoFixture, deployFixture } from "./helpers/fixtures.js";
 import { AREA_1, AREA_2, AREA_3, TOKENS_PER_SQM } from "./helpers/constants.js";
-import { registerResidents } from "./helpers/actions.js";
+import { setupResidents } from "./helpers/actions.js";
 
 describe("OSBB_DAO - Residents", function () {
   let ctx: DaoFixture;
@@ -35,7 +35,7 @@ describe("OSBB_DAO - Residents", function () {
     });
 
     it("Should mint governance tokens to resident", async function () {
-      await registerResidents(ctx.osbbDAO, [
+      await setupResidents(ctx.osbbDAO, ctx.governanceToken, [
         { signer: ctx.member1, area: AREA_1 },
       ]);
 
@@ -49,7 +49,7 @@ describe("OSBB_DAO - Residents", function () {
     it("Should register multiple residents", async function () {
       const totalArea = AREA_1 + AREA_2 + AREA_3;
 
-      await registerResidents(ctx.osbbDAO, [
+      await setupResidents(ctx.osbbDAO, ctx.governanceToken, [
         { signer: ctx.member1, area: AREA_1 },
         { signer: ctx.member2, area: AREA_2 },
         { signer: ctx.member3, area: AREA_3 },
@@ -71,18 +71,22 @@ describe("OSBB_DAO - Residents", function () {
     });
 
     it("Should revert if resident already registered", async function () {
-      await registerResidents(ctx.osbbDAO, [
+      await setupResidents(ctx.osbbDAO, ctx.governanceToken, [
         { signer: ctx.member1, area: AREA_1 },
       ]);
 
       await expect(
-        registerResidents(ctx.osbbDAO, [{ signer: ctx.member1, area: AREA_1 }]),
+        setupResidents(ctx.osbbDAO, ctx.governanceToken, [
+          { signer: ctx.member1, area: AREA_1 },
+        ]),
       ).to.be.revertedWith("Meshkanets vzhe zareyestrovanyy");
     });
 
     it("Should revert with zero apartment area", async function () {
       await expect(
-        registerResidents(ctx.osbbDAO, [{ signer: ctx.member1, area: 0 }]),
+        setupResidents(ctx.osbbDAO, ctx.governanceToken, [
+          { signer: ctx.member1, area: 0 },
+        ]),
       ).to.be.revertedWith("Ploshcha kvartiry maye buty bilshe 0");
     });
 
@@ -95,7 +99,7 @@ describe("OSBB_DAO - Residents", function () {
 
   describe("Resident Removal", function () {
     beforeEach(async function () {
-      await registerResidents(ctx.osbbDAO, [
+      await setupResidents(ctx.osbbDAO, ctx.governanceToken, [
         { signer: ctx.member1, area: AREA_1 },
         { signer: ctx.member2, area: AREA_2 },
       ]);

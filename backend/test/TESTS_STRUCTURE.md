@@ -8,7 +8,9 @@ time.helper.ts
 deployment.test.ts
 residents.test.ts
 funds.test.ts
-proposals.test.ts
-voting.test.ts
-execution.test.ts
+proposals/
+├── creation.test.ts
+├── voting.test.ts
+├── state-transitions.test.ts
+└── execution.test.ts
 token.test.ts
