@@ -24,7 +24,7 @@ const setupResidents = async (
     await governanceToken.connect(signer).delegate(address);
   }
 
-  // await mine();
+  await mine();
 };
 
 /** Create a proposal and return its id */

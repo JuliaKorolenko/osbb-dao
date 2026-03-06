@@ -12,7 +12,7 @@ import {
 } from "../helpers/constants.js";
 import { castVotes, increaseTime } from "../helpers/actions.js";
 
-describe.only("OSBB_DAO - Proposal Voting", function () {
+describe("OSBB_DAO - Proposal Voting", function () {
   let ctx: DaoFixture;
   let proposalId: bigint;
 

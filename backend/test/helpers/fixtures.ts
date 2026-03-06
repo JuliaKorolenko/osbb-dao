@@ -1,6 +1,12 @@
 import { network } from "hardhat";
-import { AREA_1, AREA_2, AREA_3 } from "./constants.js";
-import { createProposal, setupResidents } from "./actions.js";
+import { AREA_1, AREA_2, AREA_3, MIN_VOTING_DURATION } from "./constants.js";
+import {
+  castVotes,
+  createProposal,
+  increaseTime,
+  mine,
+  setupResidents,
+} from "./actions.js";
 
 const { ethers } = await network.connect();
 
@@ -53,6 +59,19 @@ async function deployWithProposalFixture() {
   return { ctx, proposalId };
 }
 
+async function deployWithProposalQueueFixture() {
+  const { ctx, proposalId } = await deployWithProposalFixture();
+
+  await castVotes(ctx.osbbDAO, proposalId, [
+    { signer: ctx.member1, support: true },
+    { signer: ctx.member2, support: true },
+    { signer: ctx.member3, support: true },
+  ]);
+
+  await increaseTime(MIN_VOTING_DURATION);
+  return { ctx, proposalId };
+}
+
 type DaoFixture = Awaited<ReturnType<typeof deployFixture>>;
 
 export {
@@ -61,4 +80,5 @@ export {
   deployFixture,
   deployWithResidentsFixture,
   deployWithProposalFixture,
+  deployWithProposalQueueFixture,
 };

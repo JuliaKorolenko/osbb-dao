@@ -1,5 +1,7 @@
 import { expect } from "chai";
 import { type DaoFixture, deployFixture, ethers } from "./helpers/fixtures.js";
+import { increaseTime } from "./helpers/actions.js";
+import { TIMELOCK_DELAY } from "./helpers/constants.js";
 
 describe("OSBB_DAO - Fund Deposits", function () {
   let ctx: DaoFixture;
